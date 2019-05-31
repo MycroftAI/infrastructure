@@ -1,0 +1,240 @@
+<html>
+<style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      text-align: left;
+      font-family: "Roboto";
+      font-size: 16px;
+      line-height: 1.5;
+      color: #2c3e50;
+    }
+
+	a {
+      text-decoration: none;
+      color: #22a7f0;
+    }
+	
+    h1 {
+      display: block;
+      text-align: center;
+      padding: 20px 20px;
+      /* margin: 0 0; */
+      background: #EEEEEE;
+	  color: #222;
+      /* font-variant: small-caps; */
+      font-size: 2.5em;
+      font-weight: 900;
+      line-height: 1.2;
+	  height: 100px;
+    }
+
+    h2 {
+      color: #22a7f0;
+      padding: 10px 0px;
+      font-size: 1em;
+      font-variant: small-caps;
+      /*	text-transform: uppercase; */
+      font-weight: 500;
+    }
+
+    h3 {
+      color: #22a7f0;
+      padding: 10px 15px;
+      font-size: 2em;
+      font-variant: small-caps;
+      font-weight: 500;
+    }
+	#activity_count {
+		font-size: 0.5em;
+	}
+	
+	.repo {
+		color: #FD9E66;
+		font-size: 1.5em;
+	}
+	.issues {
+		color: #40DBB0;
+	}
+	.prs {
+		color: #40DBB0;
+	}
+	
+    p {
+      padding: 0px 0px 30px 0px;
+    }
+
+    ul {
+      list-style: none;
+	  padding-bottom: 10px;
+    }
+	li {
+		padding-left: 20px;
+	}
+	
+	#activity {
+		padding-left: 10px;
+	}
+	
+	#login {
+		float: right;
+		position: absolute;
+		top: 0;
+		right: 0;
+		text-align: center;
+		padding: 5px;
+		margin: 0px;
+		background: #ccc;
+		height: 100px;
+	}
+	
+	button {
+		padding: 3px;
+	}
+</style>
+
+
+<script src="standard.js"></script>
+<script>
+var repoList = [];
+
+// Use localStorage to keep github credentials.
+var auth = localStorage.getItem("auth");
+var github_user = localStorage.getItem("github_user")
+if (!IsValid(auth))
+	enterCreds();
+	
+function enterCreds()
+{
+	auth = prompt("Enter your Github username:password (this is stored in your browser only and avoids Github API throttles):", "username:password");
+	if (IsValid(auth))
+	{
+		github_user = auth.split(":")[0]
+		auth = btoa(auth);
+		localStorage.setItem('github_user', github_user);
+		localStorage.setItem('auth', auth);
+		location.reload();
+	}
+}
+
+
+
+function processRepos(json, pageNo)
+{
+	setStatus("Reading page #"+pageNo);
+	list = JSON.parse(json);
+	
+	if (list.length > 0)
+	{
+		repoList = repoList.concat(list);
+		get("https://api.github.com/users/mycroftai/repos?page="+(pageNo+1)+"&per_page=100", null, auth).then(
+			function(result) {
+				// DebugLog(result);
+				processRepos(result, pageNo+1);
+			}
+		)
+	}
+	else
+		reportOnRepos(repoList);
+}
+
+function reportOnRepos(repoList)
+{		
+	setStatus("");
+
+	repoList = repoList.sort();
+	var cActive = 0;
+	for (var i=0; i < repoList.length; i++)
+	{
+		repo = repoList[i];
+		if (i > 0 && repo == repo[i-1])
+			continue;
+		
+		if (repo["open_issues_count"] > 0)
+		{
+			buildRepoReport(repo);
+			cActive += 1;
+		}
+	}
+	
+	var count = document.getElementById("activity_count");
+	count.innerHTML = "("+cActive + " of "+repoList.length+")";
+}
+
+function buildRepoReport(repo)
+{
+	get(repo["pulls_url"].replace("{/number}",""), null, auth).then(
+		function(result)
+		{
+			pulls = JSON.parse(result);
+			
+			var ol = document.getElementById("repos");
+			var newItem = document.createElement("li");
+			
+			// Repo name and issue/PR counts
+			newItem.innerHTML = "<a class='repo' href='" + repo["html_url"] + "' target='_blank'><b>MycroftAI/"+repo["name"]+"</b></a>" +
+								" <a class='issues' href='"+repo["html_url"]+"/issues' target='_blank'>issues</a>="+(repo["open_issues_count"]-pulls.length) +
+								" <a class='prs' href='"+repo["html_url"]+"/pulls' target='_blank'>PRs</a>=" + pulls.length;
+
+			// Open PRs
+			var PRs = document.createElement("ul");
+			for (var i=0; i < pulls.length;  i++)
+			{
+				var pull = pulls[i];
+				var PR = document.createElement("li");
+				PR.innerHTML = "#"+pull["number"]+" <a href='"+pull["html_url"]+"' target='_blank'>"+pull["title"]+"</a>" +
+							    " ("+ pull["user"]["login"] + ")";
+				PRs.appendChild(PR);
+			}
+			newItem.appendChild(PRs);
+			
+			ol.appendChild(newItem);
+		}
+	)
+}
+	
+function setStatus(msg)
+{
+	var el = document.getElementById("statusMsg");
+	el.innerHTML = msg;
+}
+
+
+function main()
+{
+	var el = document.getElementById("user");
+	if (IsValid(github_user))
+		el.innerHTML = github_user;
+	else
+		el.innerHTML = "not logged in";
+	
+	get("https://api.github.com/users/mycroftai/repos?page=1&per_page=100", null, auth).then(function(result)
+		{
+			processRepos(result,1);
+		}
+	)
+}
+	
+</script>
+
+<body onload="main()">
+	<h1><a href="https://github.com/MycroftAI" target="_blank">MycroftAI</a> Github Dashboard</h1>
+	<span id="statusMsg">Loading...</span>
+	
+	<h3>Repos with Activity <span id="activity_count"></span></h3>
+	<div id="activity">
+		<ul id="repos">
+		</ul>
+	</div>
+	
+	<div id="login">
+		<div><b>Github User</b></div>
+		<div id="user"></div>
+		<button onclick="enterCreds()">Change</button>
+	</div>
+</body>
+</html>
