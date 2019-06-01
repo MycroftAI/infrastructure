@@ -95,12 +95,18 @@
 	button {
 		padding: 3px;
 	}
+	
+	#user {
+		color: #5B6984;
+		padding: 5px;
+	}
 </style>
 
 
 <script src="standard.js"></script>
 <script>
 var repoList = [];
+var waiting = 0;
 
 // Use localStorage to keep github credentials.
 var auth = localStorage.getItem("auth");
@@ -133,31 +139,38 @@ function processRepos(json, pageNo)
 		repoList = repoList.concat(list);
 		get("https://api.github.com/users/mycroftai/repos?page="+(pageNo+1)+"&per_page=100", null, auth).then(
 			function(result) {
-				// DebugLog(result);
 				processRepos(result, pageNo+1);
 			}
 		)
 	}
 	else
-		reportOnRepos(repoList);
+		downloadRepoData(repoList);
 }
 
-function reportOnRepos(repoList)
-{		
-	setStatus("");
-
+function downloadRepoData(repoList)
+{
+	setStatus("Downloading repo data...");
+	
+	waiting = repoList.length;
 	repoList = repoList.sort();
+
 	var cActive = 0;
 	for (var i=0; i < repoList.length; i++)
 	{
 		repo = repoList[i];
-		if (i > 0 && repo == repo[i-1])
-			continue;
 		
 		if (repo["open_issues_count"] > 0)
 		{
-			buildRepoReport(repo);
+			downloadRepoPulls(repo);
 			cActive += 1;
+		}
+		else
+		{
+			// Skip the Repos with no active PRs or Issues
+			waiting--;
+			repo["pulls_data"] = null;
+			if (waiting == 0)
+				fill_page();
 		}
 	}
 	
@@ -165,38 +178,66 @@ function reportOnRepos(repoList)
 	count.innerHTML = "("+cActive + " of "+repoList.length+")";
 }
 
-function buildRepoReport(repo)
+function downloadRepoPulls(repo)
 {
+	setStatus("Downloading repo data..."+repo["pulls_url"].replace("{/number}",""));
+
 	get(repo["pulls_url"].replace("{/number}",""), null, auth).then(
 		function(result)
 		{
 			pulls = JSON.parse(result);
-			
-			var ol = document.getElementById("repos");
-			var newItem = document.createElement("li");
-			
-			// Repo name and issue/PR counts
-			newItem.innerHTML = "<a class='repo' href='" + repo["html_url"] + "' target='_blank'><b>MycroftAI/"+repo["name"]+"</b></a>" +
-								" <a class='issues' href='"+repo["html_url"]+"/issues' target='_blank'>issues</a>="+(repo["open_issues_count"]-pulls.length) +
-								" <a class='prs' href='"+repo["html_url"]+"/pulls' target='_blank'>PRs</a>=" + pulls.length;
+			repo["pulls_data"] = pulls;
 
-			// Open PRs
-			var PRs = document.createElement("ul");
-			for (var i=0; i < pulls.length;  i++)
-			{
-				var pull = pulls[i];
-				var PR = document.createElement("li");
-				PR.innerHTML = "#"+pull["number"]+" <a href='"+pull["html_url"]+"' target='_blank'>"+pull["title"]+"</a>" +
-							    " ("+ pull["user"]["login"] + ")";
-				PRs.appendChild(PR);
-			}
-			newItem.appendChild(PRs);
-			
-			ol.appendChild(newItem);
+			waiting--;
+			if (waiting == 0)
+				populate_page();
 		}
 	)
 }
+
+
+function populate_page()
+{
+	setStatus("Building view");
+
+	// Called after repos are fully downloaded
+	for (var i=0; i < repoList.length; i++)
+	{
+		repo = repoList[i];
+		if (IsValid(repo["pulls_data"]))
+		addRepoToPage(repo);
+	}
+
+	setStatus("");
+}
+
+function addRepoToPage(repo)
+{		
+	var ol = document.getElementById("repos");
+	var newItem = document.createElement("li");
 	
+	// Repo name and issue/PR counts
+	pulls = repo["pulls_data"];
+	newItem.innerHTML = "<a class='repo' href='" + repo["html_url"] + "' target='_blank'><b>MycroftAI/"+repo["name"]+"</b></a>" +
+						" <a class='issues' href='"+repo["html_url"]+"/issues' target='_blank'>issues</a>="+(repo["open_issues_count"]-pulls.length) +
+						" <a class='prs' href='"+repo["html_url"]+"/pulls' target='_blank'>PRs</a>=" + pulls.length;
+
+	// Open PRs
+	var PRs = document.createElement("ul");
+	for (var i=0; i < pulls.length;  i++)
+	{
+		var pull = pulls[i];
+		var PR = document.createElement("li");
+		PR.innerHTML = "#"+pull["number"]+" <a href='"+pull["html_url"]+"' target='_blank'>"+pull["title"]+"</a>" +
+						" ("+ pull["user"]["login"] + ")";
+		PRs.appendChild(PR);
+	}
+	newItem.appendChild(PRs);
+	
+	ol.appendChild(newItem);
+}
+
+
 function setStatus(msg)
 {
 	var el = document.getElementById("statusMsg");
